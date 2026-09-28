@@ -11,25 +11,35 @@ Examples:
     radio-hil reset -b nrf52840dk-1        (or -a for all, -u for all in use)
     radio-hil power off -a                 (or -b <names>, -u)
 
-Board names are <RIOT board>-<n>, where n is the number of the Pi the board
-is connected to (radio-hil-1 -> 1, radio-hil-2 -> 2). A name set on the Pi
-with 'inet-nm-export NM_NAME <name>' takes precedence.
+Board names are <RIOT board>-<n>, where n is the trailing number of the
+Pi's host name (radio-hil-1 -> 1, radio-hil-2 -> 2). Hosts without a
+trailing number get their position in the host list instead. Each Pi has
+every board type at most once.
 
 The Pis are reached as ssh hosts radio-hil-1, radio-hil-2 (set them up in
 ~/.ssh/config), or set RADIO_HIL_HOSTS="host1 host2 ...".
 power/reset need radio-hil-power installed on the Pis.
+
+Note: build-flash builds with your local RIOT checkout, but flashing and
+the terminal go through the RIOT checkout on the Pis (PI_APP). Keep both
+roughly in sync, otherwise flasher configs or programmer flags may differ
+and flashing fails in confusing ways.
 """
 
 import argparse
+import functools
 import getpass
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 
 HOSTS = os.environ.get("RADIO_HIL_HOSTS", "radio-hil-1 radio-hil-2").split()
 CACHE = os.path.expanduser("~/.cache/radio-hil/boards.json")
+# Give up quickly on Pis that are switched off or unreachable
+SSH_OPTS = ["-o", "ConnectTimeout=3"]
 # Any RIOT application on the Pis, only used as make context for flash/term
 PI_APP = "/srv/radio-hil/RIOT/examples/basic/hello-world"
 
@@ -44,10 +54,22 @@ def warn(msg):
 
 
 def ssh(host, cmd, tty=False, capture=False):
-    args = ["ssh"] + (["-t"] if tty else []) + [host, cmd]
+    args = ["ssh", *SSH_OPTS] + (["-t"] if tty else []) + [host, cmd]
     return subprocess.run(args, text=True, capture_output=capture)
 
 
+def ssh_stream(host, cmd):
+    """Run cmd on host, print its output line by line, return all of it."""
+    proc = subprocess.Popen(["ssh", *SSH_OPTS, host, cmd], stdout=subprocess.PIPE, text=True)
+    lines = []
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        lines.append(line)
+    proc.wait()
+    return "".join(lines)
+
+
+@functools.lru_cache(maxsize=None)
 def load_boards():
     try:
         with open(CACHE) as fh:
@@ -76,38 +98,42 @@ def group_by_host(names):
 
 # --- fetch / list -----------------------------------------------------------
 
+def host_number(host, position):
+    """Trailing number of the host name (radio-hil-2 -> 2), else position."""
+    m = re.search(r"-(\d+)$", host)
+    return int(m.group(1)) if m else position
+
+
 def cmd_fetch():
-    cfg = "${NM_CONFIG_DIR:-/etc/inet-nm}"
     boards = {}
-    for idx, host in enumerate(HOSTS, start=1):
-        res = ssh(host, f"cat {cfg}/nodes.json && echo '#SPLIT#' && "
-                        f"(cat {cfg}/env.json 2>/dev/null || echo '{{}}')", capture=True)
+    numbers = {}
+    for position, host in enumerate(HOSTS, start=1):
+        idx = host_number(host, position)
+        if idx in numbers:
+            die(f"{host} and {numbers[idx]} both map to number {idx}, "
+                f"rename one of them in RADIO_HIL_HOSTS")
+        numbers[idx] = host
+        res = ssh(host, "cat ${NM_CONFIG_DIR:-/etc/inet-nm}/nodes.json", capture=True)
         if res.returncode != 0:
             warn(f"{host} not reachable, skipped ({res.stderr.strip()})")
             continue
-        nodes_txt, env_txt = res.stdout.split("#SPLIT#")
-        env = json.loads(env_txt).get("nodes", {})
-        nodes = [n for n in json.loads(nodes_txt) if not n.get("ignore")]
-        types = [n["board"] for n in nodes]
-        for n in nodes:
-            name = env.get(n["uid"], {}).get("NM_NAME")
-            if not name:
-                if types.count(n["board"]) > 1:
-                    warn(f"{host} has several {n['board']} without NM_NAME, "
-                         f"skipped {n['uid']}")
-                    continue
-                name = f"{n['board']}-{idx}"
+        count = 0
+        for n in json.loads(res.stdout):
+            if n.get("ignore"):
+                continue
+            name = f"{n['board']}-{idx}"
             if name in boards:
-                warn(f"name {name} exists on {boards[name]['host']} and {host}, "
-                     f"keeping the first")
+                warn(f"{host} has {n['board']} more than once, skipped {n['uid']}")
                 continue
             boards[name] = {"uid": n["uid"], "board": n["board"], "host": host}
-        print(f"{host}: {sum(1 for b in boards.values() if b['host'] == host)} boards")
+            count += 1
+        print(f"{host}: {count} boards")
     if not boards:
         die("no boards fetched")
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     with open(CACHE, "w") as fh:
         json.dump(boards, fh, indent=2, sort_keys=True)
+    load_boards.cache_clear()
     cmd_list()
 
 
@@ -122,27 +148,27 @@ def flash(name, firmware):
     """Copy firmware to the board's Pi and flash it, returns True on success."""
     e = entry(name)
     host, uid = e["host"], e["uid"]
-    if not os.path.isfile(firmware):
-        warn(f"firmware '{firmware}' not found")
-        return False
     remote = f"/tmp/{getpass.getuser()}-{name}{os.path.splitext(firmware)[1]}"
-    if subprocess.run(["scp", "-q", firmware, f"{host}:{remote}"]).returncode != 0:
+    if subprocess.run(["scp", *SSH_OPTS, "-q", firmware, f"{host}:{remote}"]).returncode != 0:
         warn(f"copying the firmware to {host} failed")
         return False
-    make = (f"make -C {PI_APP} BOARD=$NM_BOARD DEBUG_ADAPTER_ID=$NM_SERIAL "
+    make = (f"make -C {PI_APP} BOARD=$NM_BOARD DEBUG_ADAPTER_ID=$NM_SERIAL PORT=$NM_PORT "
             f"FLASHFILE={remote} flash-only")
-    res = ssh(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}", capture=True)
-    print(res.stdout, end="")
-    if "RESULT:" not in res.stdout:
+    # remove the copied firmware afterwards, whatever the result
+    out = ssh_stream(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}; "
+                           f"rm -f {shlex.quote(remote)}")
+    if "RESULT:" not in out:
         warn(f"'{name}' was not flashed, it is in use by someone else or not connected")
         return False
-    if not res.stdout.rstrip().endswith(": 0"):
+    if not out.rstrip().endswith(": 0"):
         warn(f"flashing '{name}' failed, see output above")
         return False
     return True
 
 
 def cmd_flash(names, firmware):
+    if not os.path.isfile(firmware):
+        die(f"firmware '{firmware}' not found")
     failed = [name for name in names if not flash(name, firmware)]
     if failed:
         die(f"not flashed: {', '.join(failed)}")
@@ -150,7 +176,8 @@ def cmd_flash(names, firmware):
 
 def build(app, board):
     """Build app for board, returns the file the board's flasher needs."""
-    if subprocess.run(["make", "-j", "-C", app, f"BOARD={board}"]).returncode != 0:
+    jobs = f"-j{os.cpu_count() or 1}"
+    if subprocess.run(["make", jobs, "-C", app, f"BOARD={board}"]).returncode != 0:
         die(f"build for {board} failed")
     # ask RIOT which file the flasher of this board needs (.elf, .bin, .hex)
     res = subprocess.run(["make", "-s", "--no-print-directory", "-C", app, f"BOARD={board}",
@@ -158,6 +185,8 @@ def build(app, board):
     firmware = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
     if res.returncode != 0 or not firmware:
         die(f"could not determine the flash file for {board}:\n{res.stderr}")
+    if not os.path.isfile(firmware):
+        die(f"build for {board} did not produce '{firmware}'")
     return firmware
 
 
