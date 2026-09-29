@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radio-hil"
+dynamic = ["version"]
+description = "Command line client for the radio-hil hardware-in-the-loop setup (RIOT boards on Raspberry Pis)"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["argcomplete>=3"]
+
+[project.urls]
+Homepage = "https://github.com/Stopkaa/radio-hil"
+
+[project.scripts]
+radio-hil = "radio_hil.cli:main"
+
+[tool.setuptools]
+packages = ["radio_hil"]
+
+[tool.setuptools.dynamic]
+version = {attr = "radio_hil.__version__"}

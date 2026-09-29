@@ -7,7 +7,7 @@ switches boards on, off or resets them.
 
 ## Requirements
 
-- Python 3, `ssh`, `scp` and `make`
+- Python 3.8 or newer, `ssh`, `scp` and `make`
 - an account on the Pis with your SSH key (ask the admin, send them your
   **public** key, e.g. `~/.ssh/id_ed25519.pub`)
 - for `build-flash`: a local RIOT checkout with the toolchains for your boards
@@ -30,12 +30,42 @@ Host radio-hil-2
 Check with `ssh radio-hil-1 true`. Other host names can be set with
 `RADIO_HIL_HOSTS="host1 host2"`.
 
-Install the CLI and fetch the boards:
+## Install
+
+With [pipx](https://pipx.pypa.io) (`sudo pacman -S python-pipx`,
+`sudo apt install pipx`):
 
 ```sh
-install -m 755 radio-hil ~/.local/bin/radio-hil
+pipx install git+https://github.com/Stopkaa/radio-hil
 radio-hil fetch
 ```
+
+Update to the latest version:
+
+```sh
+pipx install --force git+https://github.com/Stopkaa/radio-hil
+```
+
+Inside a virtual environment `pip install git+https://github.com/Stopkaa/radio-hil`
+works as well.
+
+### Tab completion
+
+Completes commands, options, board names and firmware files. Add to
+`~/.bashrc`:
+
+```sh
+eval "$(register-python-argcomplete radio-hil)"
+```
+
+or to `~/.zshrc` (after `compinit`, oh-my-zsh already does that):
+
+```sh
+eval "$(register-python-argcomplete --shell zsh radio-hil)"
+```
+
+Board names come from the list saved by `radio-hil fetch`, so run it again
+after boards were added.
 
 ## Usage
 
@@ -65,6 +95,9 @@ radio-hil reset -u               # all boards currently in use
 radio-hil power off -a           # all boards off
 radio-hil power on -b frdm-kw41z-1
 ```
+
+`flash`, `build-flash`, `power` and `reset` work on all given boards at the
+same time. With several boards, every output line starts with `[board name]`.
 
 `radio-hil <command> -h` shows the options of each command.
 
