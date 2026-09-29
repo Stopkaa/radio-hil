@@ -1,6 +1,6 @@
 # radio-hil
 
-Command line client for the radio-hil hardware-in-the-loop setup: RIOT
+AI generated command line client for the radio-hil hardware-in-the-loop setup: RIOT
 development boards connected to one or more Raspberry Pis. You build firmware
 on your own machine, and `radio-hil` flashes it, opens the board's shell and
 switches boards on, off or resets them.
