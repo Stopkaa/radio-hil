@@ -11,6 +11,7 @@ Examples:
     radio-hil reset -b nrf52840dk-1        (or -a for all, -u for all in use)
     radio-hil poweroff -a                  (or -b <names>, -u)
     radio-hil poweron -b frdm-kw41z-1
+    radio-hil poweroff -p radio-hil-2      (all boards of a Pi, or -p 2)
 
 Board names are <RIOT board>-<n>, where n is the trailing number of the
 Pi's host name (radio-hil-1 -> 1, radio-hil-2 -> 2). Hosts without a
@@ -148,7 +149,6 @@ def cmd_fetch():
         if res.returncode != 0:
             warn(f"{host} not reachable, skipped ({res.stderr.strip()})")
             continue
-        count = 0
         for n in json.loads(res.stdout):
             if n.get("ignore"):
                 continue
@@ -157,8 +157,6 @@ def cmd_fetch():
                 warn(f"{host} has {n['board']} more than once, skipped {n['uid']}")
                 continue
             boards[name] = {"uid": n["uid"], "board": n["board"], "host": host}
-            count += 1
-        print(f"{host}: {count} boards")
     if not boards:
         die("no boards fetched")
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
@@ -179,6 +177,22 @@ def complete_boards(prefix, parsed_args, **_):
     return [name for name in sorted(boards) if name.startswith(prefix) and name not in given]
 
 
+def complete_pis(prefix, parsed_args, **_):
+    """Tab completion: Pi host names, without the ones already given."""
+    given = getattr(parsed_args, "pis", None) or []
+    return [h for h in HOSTS if h.startswith(prefix) and h not in given]
+
+
+def resolve_pi(pi):
+    """Host for a Pi given as host name (radio-hil-2) or number (2)."""
+    if pi in HOSTS:
+        return pi
+    for position, host in enumerate(HOSTS, start=1):
+        if pi.isdigit() and host_number(host, position) == int(pi):
+            return host
+    die(f"unknown Pi '{pi}' (known: {', '.join(HOSTS)})")
+
+
 def completer(arg, func):
     """Attach a tab completer to an argparse argument (no-op without argcomplete)."""
     if argcomplete:
@@ -186,8 +200,16 @@ def completer(arg, func):
 
 
 def cmd_list():
-    for name in sorted(load_boards()):
-        print(name)
+    """Board names, grouped by the Pi they are connected to."""
+    by_host = {}
+    for name, e in load_boards().items():
+        by_host.setdefault(e.get("host", "?") if isinstance(e, dict) else "?", []).append(name)
+    order = [h for h in HOSTS if h in by_host] + sorted(set(by_host) - set(HOSTS))
+    for i, host in enumerate(order):
+        names = sorted(by_host[host])
+        print(("\n" if i else "") + f"{host} ({len(names)} board{'s' if len(names) != 1 else ''}):")
+        for name in names:
+            print(f"  {name}")
 
 
 # --- flash / build-flash ----------------------------------------------------
@@ -279,17 +301,19 @@ def cmd_term(name):
 
 # --- power / reset ----------------------------------------------------------
 
-def power(action, names, all_boards, in_use):
+def power(action, names, all_boards, in_use, pis=None):
     # radio-hil-power is installed on the Pis (/usr/local/bin);
     # -a (all) and -u (in use) are resolved there
     if all_boards or in_use:
         flag = "-a" if all_boards else "-u"
         jobs = {host: flag for host in HOSTS}
+    elif pis:
+        jobs = {resolve_pi(pi): "-a" for pi in pis}       # all boards of these Pis
     elif names:
         jobs = {host: " ".join(uid for _, uid in members)
                 for host, members in group_by_host(names).items()}
     else:
-        die("give boards with -b, or -a for all, or -u for all in use")
+        die("give boards with -b, Pis with -p, -a for all or -u for all in use")
     def run(job):
         host, arg = job
         res = ssh(host, f"radio-hil-power {action} {arg}", capture=True)
@@ -339,6 +363,9 @@ def main():
         g = p.add_mutually_exclusive_group(required=True)
         completer(g.add_argument("-b", "--boards", nargs="+", metavar="NAME"),
                   complete_boards)
+        completer(g.add_argument("-p", "--pis", nargs="+", metavar="PI",
+                                 help="all boards of these Pis (host name or number)"),
+                  complete_pis)
         g.add_argument("-a", "--all", action="store_true", help="all boards")
         g.add_argument("-u", "--used", action="store_true", help="all boards in use")
 
@@ -356,11 +383,11 @@ def main():
     elif args.cmd == "term":
         cmd_term(args.board)
     elif args.cmd == "reset":
-        power("reset", args.boards, args.all, args.used)
+        power("reset", args.boards, args.all, args.used, args.pis)
     elif args.cmd == "poweron":
-        power("on", args.boards, args.all, args.used)
+        power("on", args.boards, args.all, args.used, args.pis)
     elif args.cmd == "poweroff":
-        power("off", args.boards, args.all, args.used)
+        power("off", args.boards, args.all, args.used, args.pis)
 
 
 if __name__ == "__main__":

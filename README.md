@@ -71,7 +71,7 @@ after boards were added.
 
 ```sh
 radio-hil fetch                  # get the boards of all Pis
-radio-hil list                   # show the board names
+radio-hil list                   # show the boards of each Pi
 ```
 
 Build and flash (run from your RIOT checkout):
@@ -94,6 +94,7 @@ radio-hil reset -b nrf52840dk-1  # power off and on, like the reset button
 radio-hil reset -u               # all boards currently in use
 radio-hil poweroff -a            # all boards off
 radio-hil poweron -b frdm-kw41z-1
+radio-hil poweroff -p radio-hil-2 # all boards of one Pi (or -p 2)
 ```
 
 `flash`, `build-flash`, `poweron`, `poweroff` and `reset` work on all given boards at the
