@@ -9,7 +9,8 @@ Examples:
     radio-hil build-flash -b nrf52840dk-2 frdm-kw41z-1 -f examples/basic/hello-world
     radio-hil term nrf52840dk-1
     radio-hil reset -b nrf52840dk-1        (or -a for all, -u for all in use)
-    radio-hil power off -a                 (or -b <names>, -u)
+    radio-hil poweroff -a                  (or -b <names>, -u)
+    radio-hil poweron -b frdm-kw41z-1
 
 Board names are <RIOT board>-<n>, where n is the trailing number of the
 Pi's host name (radio-hil-1 -> 1, radio-hil-2 -> 2). Hosts without a
@@ -19,7 +20,7 @@ every board type at most once.
 The Pis are reached as ssh hosts radio-hil-1, radio-hil-2 (set them up in
 ~/.ssh/config), or set RADIO_HIL_HOSTS="host1 host2 ...".
 power/reset need radio-hil-power installed on the Pis.
-flash, build-flash, power and reset work on all given boards at the same time.
+flash, build-flash, poweron, poweroff and reset work on all given boards at the same time.
 
 Note: build-flash builds with your local RIOT checkout, but flashing and
 the terminal go through the RIOT checkout on the Pis (PI_APP). Keep both
@@ -331,10 +332,10 @@ def main():
     p = sub.add_parser("term", help="open the RIOT shell of a board")
     completer(p.add_argument("board", metavar="NAME"), complete_boards)
 
-    for cmd, text in (("reset", "power cycle boards"), ("power", "switch USB power")):
+    for cmd, text in (("reset", "power cycle boards (off and on again)"),
+                      ("poweron", "switch the USB power of boards on"),
+                      ("poweroff", "switch the USB power of boards off")):
         p = sub.add_parser(cmd, help=text)
-        if cmd == "power":
-            p.add_argument("action", choices=("on", "off"))
         g = p.add_mutually_exclusive_group(required=True)
         completer(g.add_argument("-b", "--boards", nargs="+", metavar="NAME"),
                   complete_boards)
@@ -356,8 +357,10 @@ def main():
         cmd_term(args.board)
     elif args.cmd == "reset":
         power("reset", args.boards, args.all, args.used)
-    elif args.cmd == "power":
-        power(args.action, args.boards, args.all, args.used)
+    elif args.cmd == "poweron":
+        power("on", args.boards, args.all, args.used)
+    elif args.cmd == "poweroff":
+        power("off", args.boards, args.all, args.used)
 
 
 if __name__ == "__main__":

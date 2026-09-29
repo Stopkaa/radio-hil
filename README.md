@@ -92,11 +92,11 @@ Reset and power:
 ```sh
 radio-hil reset -b nrf52840dk-1  # power off and on, like the reset button
 radio-hil reset -u               # all boards currently in use
-radio-hil power off -a           # all boards off
-radio-hil power on -b frdm-kw41z-1
+radio-hil poweroff -a            # all boards off
+radio-hil poweron -b frdm-kw41z-1
 ```
 
-`flash`, `build-flash`, `power` and `reset` work on all given boards at the
+`flash`, `build-flash`, `poweron`, `poweroff` and `reset` work on all given boards at the
 same time. With several boards, every output line starts with `[board name]`.
 
 `radio-hil <command> -h` shows the options of each command.
@@ -110,7 +110,7 @@ every board type at most once.
 ## Good to know
 
 - **Locking**: `term`, `flash` and `build-flash` lock the board. If someone
-  else is using it, flashing is refused. `reset` and `power` do **not** check
+  else is using it, flashing is refused. `reset`, `poweron` and `poweroff` do **not** check
   locks, so make sure nobody else is working on the board.
 - **Firmware format**: `flash` needs the file the board's flasher expects,
   e.g. `.elf` for `nrf52840dk`, `.bin` for `samr21-xpro`. `build-flash` picks
