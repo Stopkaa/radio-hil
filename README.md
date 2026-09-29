@@ -37,7 +37,6 @@ With [pipx](https://pipx.pypa.io) (`sudo pacman -S python-pipx`,
 
 ```sh
 pipx install git+https://github.com/Stopkaa/radio-hil
-radio-hil fetch
 ```
 
 Update to the latest version:
@@ -46,12 +45,42 @@ Update to the latest version:
 pipx install --force git+https://github.com/Stopkaa/radio-hil
 ```
 
-Inside a virtual environment `pip install git+https://github.com/Stopkaa/radio-hil`
-works as well.
+### With conda (or another virtual environment)
+
+```sh
+conda activate <env>
+pip install git+https://github.com/Stopkaa/radio-hil
+```
+
+Update with `pip install --force-reinstall --no-deps git+https://github.com/Stopkaa/radio-hil`.
+`radio-hil` is then only available while this environment is active.
+
+### From a local checkout
+
+To test changes before pushing them, install your checkout in editable mode.
+Changes in the checkout then take effect immediately:
+
+```sh
+pip install -e ~/radio-hil            # in a conda/virtual environment
+pipx install --force --editable ~/radio-hil
+```
+
+If `which radio-hil` still points to `~/.local/bin/radio-hil` from an older
+manual install, delete that file.
+
+### First start
+
+Switch the boards on (they may have been switched off to save power or after
+a board was added) and get the board list:
+
+```sh
+radio-hil poweron -a
+radio-hil fetch
+```
 
 ### Tab completion
 
-Completes commands, options, board names and firmware files. Add to
+Completes commands, options, board names, Pis and firmware files. Add to
 `~/.bashrc`:
 
 ```sh
@@ -63,6 +92,10 @@ or to `~/.zshrc` (after `compinit`, oh-my-zsh already does that):
 ```sh
 eval "$(register-python-argcomplete --shell zsh radio-hil)"
 ```
+
+With conda, the line must come after the `conda activate` of the environment
+that has `radio-hil`, otherwise `register-python-argcomplete` is not found.
+In an open terminal, run `source ~/.bashrc` (or `~/.zshrc`) once.
 
 Board names come from the list saved by `radio-hil fetch`, so run it again
 after boards were added.
