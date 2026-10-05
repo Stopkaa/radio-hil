@@ -53,6 +53,15 @@ CACHE = os.path.expanduser("~/.cache/radio-hil/boards.json")
 SSH_OPTS = ["-o", "ConnectTimeout=3"]
 # Any RIOT application on the Pis, only used as make context for flash/term
 PI_APP = "/srv/radio-hil/RIOT/examples/basic/hello-world"
+# Serial port of the board's flasher and shell. inet-nm sets NM_PORT to the
+# first interface of a USB device; boards whose UART is on another interface
+# of a multi-port chip are listed here (OpenMote-B: FT2232, UART on the 2nd).
+PORT_VAR = {"openmote-b": "NM_PORT_1"}
+
+
+def port_of(board):
+    """Shell variable (set by inet-nm on the Pi) holding the board's serial port."""
+    return "$" + PORT_VAR.get(board, "NM_PORT")
 
 
 def die(msg):
@@ -222,7 +231,7 @@ def flash(name, firmware, prefix=""):
     if subprocess.run(["scp", *SSH_OPTS, "-q", firmware, f"{host}:{remote}"]).returncode != 0:
         warn(f"copying the firmware to {host} failed")
         return False
-    make = (f"make -C {PI_APP} BOARD=$NM_BOARD DEBUG_ADAPTER_ID=$NM_SERIAL PORT=$NM_PORT "
+    make = (f"make -C {PI_APP} BOARD=$NM_BOARD DEBUG_ADAPTER_ID=$NM_SERIAL PORT={port_of(e['board'])} "
             f"FLASHFILE={remote} flash-only")
     # remove the copied firmware afterwards, whatever the result
     res = ssh_stream(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}; "
@@ -290,7 +299,7 @@ def cmd_build_flash(names, app):
 
 def cmd_term(name):
     e = entry(name)
-    make = f"make -C {PI_APP} BOARD=$NM_BOARD PORT=$NM_PORT term"
+    make = f"make -C {PI_APP} BOARD=$NM_BOARD PORT={port_of(e['board'])} term"
     # The Pi may not know the local terminal type (e.g. xterm-kitty) and
     # tmux refuses to start then, so always use a type every system knows.
     # Own tmux session per board (-n), otherwise a second 'term' takes over
