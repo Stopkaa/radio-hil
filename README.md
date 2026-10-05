@@ -138,8 +138,12 @@ same time. With several boards, every output line starts with `[board name]`.
 ## Board names
 
 A board is called `<RIOT board>-<n>`, where `n` is the number of the Pi it is
-connected to: the `nrf52840dk` at `radio-hil-1` is `nrf52840dk-1`. Each Pi has
-every board type at most once.
+connected to: the `nrf52840dk` at `radio-hil-1` is `nrf52840dk-1`.
+
+If a Pi has a board type more than once, the boards get a letter in the order
+of their USB port: `nrf52840dk-1a`, `nrf52840dk-1b`. A board keeps its name as
+long as it stays in the same port. Boards without a serial number (OpenMote-B)
+cannot be told apart, so only one of them per Pi.
 
 ## Good to know
 

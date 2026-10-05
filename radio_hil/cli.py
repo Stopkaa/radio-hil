@@ -15,8 +15,9 @@ Examples:
 
 Board names are <RIOT board>-<n>, where n is the trailing number of the
 Pi's host name (radio-hil-1 -> 1, radio-hil-2 -> 2). Hosts without a
-trailing number get their position in the host list instead. Each Pi has
-every board type at most once.
+trailing number get their position in the host list instead. If a Pi has
+a board type more than once, the boards get a letter in the order of their
+USB port: nrf52840dk-1a, nrf52840dk-1b.
 
 The Pis are reached as ssh hosts radio-hil-1, radio-hil-2 (set them up in
 ~/.ssh/config), or set RADIO_HIL_HOSTS="host1 host2 ...".
@@ -145,6 +146,48 @@ def host_number(host, position):
     return int(m.group(1)) if m else position
 
 
+SPLIT = "#RADIO-HIL-SPLIT#"
+
+
+def port_key(id_path):
+    """Sort key for a USB location: '...-usb-0:1.3.4.4.2' -> (1, 3, 4, 4, 2)."""
+    tail = id_path.rsplit(":", 1)[-1] if id_path else ""
+    return tuple(int(p) for p in tail.split(".") if p.isdigit())
+
+
+def name_boards(host, idx, nodes, location_cache):
+    """[(name, node)] for the boards of one Pi.
+
+    A board type that exists once is <board>-<idx>. Several of one type get a
+    letter in the order of their USB port (from inet-nm's location cache), so
+    a board keeps its name as long as it stays in the same port:
+    nrf52840dk-1a, nrf52840dk-1b. Boards without a known port come last."""
+    port_of_uid = {e["node_uid"]: port_key(e["id_path"])
+                   for e in location_cache if e.get("state") != "missing"}
+    by_type, seen = {}, set()
+    for n in nodes:
+        if n.get("ignore"):
+            continue
+        if n["uid"] in seen:   # e.g. two boards without serial number
+            warn(f"{host}: two boards share the uid {n['uid']} ({n['board']}), "
+                 f"skipped the second one")
+            continue
+        seen.add(n["uid"])
+        by_type.setdefault(n["board"], []).append(n)
+    named = []
+    for board, group in by_type.items():
+        if len(group) == 1:
+            named.append((f"{board}-{idx}", group[0]))
+            continue
+        group.sort(key=lambda n: (n["uid"] not in port_of_uid,
+                                  port_of_uid.get(n["uid"], ()), n["uid"]))
+        if len(group) > 26:
+            warn(f"{host} has more than 26 {board}, only the first 26 are used")
+        for letter, n in zip("abcdefghijklmnopqrstuvwxyz", group):
+            named.append((f"{board}-{idx}{letter}", n))
+    return named
+
+
 def cmd_fetch():
     boards = {}
     numbers = {}
@@ -154,17 +197,15 @@ def cmd_fetch():
             die(f"{host} and {numbers[idx]} both map to number {idx}, "
                 f"rename one of them in RADIO_HIL_HOSTS")
         numbers[idx] = host
-        res = ssh(host, "cat ${NM_CONFIG_DIR:-/etc/inet-nm}/nodes.json", capture=True)
+        cfg = "${NM_CONFIG_DIR:-/etc/inet-nm}"
+        res = ssh(host, f"cat {cfg}/nodes.json && echo '{SPLIT}' && "
+                        f"(cat {cfg}/location_cache.json 2>/dev/null || echo '[]')",
+                  capture=True)
         if res.returncode != 0:
             warn(f"{host} not reachable, skipped ({res.stderr.strip()})")
             continue
-        for n in json.loads(res.stdout):
-            if n.get("ignore"):
-                continue
-            name = f"{n['board']}-{idx}"
-            if name in boards:
-                warn(f"{host} has {n['board']} more than once, skipped {n['uid']}")
-                continue
+        nodes_txt, cache_txt = res.stdout.split(SPLIT)
+        for name, n in name_boards(host, idx, json.loads(nodes_txt), json.loads(cache_txt)):
             boards[name] = {"uid": n["uid"], "board": n["board"], "host": host}
     if not boards:
         die("no boards fetched")
