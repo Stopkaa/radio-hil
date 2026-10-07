@@ -60,6 +60,12 @@ PI_APP = "/srv/radio-hil/RIOT/examples/basic/hello-world"
 PORT_VAR = {"openmote-b": "NM_PORT_1"}
 
 
+# Boards flashed without DEBUG_ADAPTER_ID. OpenOCD on the Pis crashes
+# ("buffer overflow detected") when given the 48-character serial number of
+# the pba-d-01-kw2x's DAPLink. Fine as long as each Pi has one of them.
+NO_ADAPTER_ID = {"pba-d-01-kw2x"}
+
+
 def port_of(board):
     """Shell variable (set by inet-nm on the Pi) holding the board's serial port."""
     return "$" + PORT_VAR.get(board, "NM_PORT")
@@ -272,7 +278,8 @@ def flash(name, firmware, prefix=""):
     if subprocess.run(["scp", *SSH_OPTS, "-q", firmware, f"{host}:{remote}"]).returncode != 0:
         warn(f"copying the firmware to {host} failed")
         return False
-    make = (f"make -C {PI_APP} BOARD=$NM_BOARD DEBUG_ADAPTER_ID=$NM_SERIAL PORT={port_of(e['board'])} "
+    adapter = "" if e["board"] in NO_ADAPTER_ID else "DEBUG_ADAPTER_ID=$NM_SERIAL "
+    make = (f"make -C {PI_APP} BOARD=$NM_BOARD {adapter}PORT={port_of(e['board'])} "
             f"FLASHFILE={remote} flash-only")
     # remove the copied firmware afterwards, whatever the result
     res = ssh_stream(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}; "
