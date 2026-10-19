@@ -83,7 +83,8 @@ Runs that share no board run at the same time, one per channel: 2.4 GHz on
 channels 15, 20 and 26 (between the WLAN channels 1/6/11), sub-GHz on channel
 0 (868.3 MHz, the only O-QPSK channel in the EU). If a radio has two
 exemplars, the two directions of a pair can run at the same time on swapped
-boards. A radio with two exemplars is also tested against itself.
+boards. A radio with two exemplars is also tested against itself, in one
+direction only (both ends are the same radio).
 
 ## Results
 

@@ -126,10 +126,11 @@ def plan_jobs(cfg, exemplars, radios, dut):
             continue
         phy = common[0]
         band = cfg["phys"][phy]["band"]
-        for n, (src, dst) in enumerate(((x, y), (y, x)), start=1):
-            # against itself: the second direction swaps the exemplars
+        # against itself one direction is enough, both ends are the same radio
+        directions = ((x, y),) if x == y else ((x, y), (y, x))
+        for n, (src, dst) in enumerate(directions, start=1):
             jobs.append({"id": f"{x}~{y}~{n}", "src": src, "dst": dst,
-                         "phy": phy, "band": band, "swap": x == y and n == 2})
+                         "phy": phy, "band": band})
     return jobs
 
 
@@ -382,7 +383,7 @@ class Runner:
         # prefer boards that already have the right firmware
         def candidates(radio, taken):
             names = [n for n in self.exemplars[radio] if n not in self.busy and n not in taken]
-            names.sort(key=natural, reverse=job.get("swap", False))
+            names.sort(key=natural)
             return sorted(names, key=lambda n: self.flashed.get(n) != radio)  # stable
         src = candidates(job["src"], ())
         if not src:
@@ -662,7 +663,8 @@ def main():
     print(f"RIOT {args.commit} in {riotbase}")
     for name, ph in phases.items():
         print(f"  ping {name:8} -s {ph['size']} -c {args.count or ph['count']} -i {ph['interval']}")
-    print(f"{len(jobs)} directions of {len(jobs) // 2} pairs, "
+    pairs = len({j["id"].rsplit("~", 1)[0] for j in jobs})
+    print(f"{len(jobs)} directions of {pairs} pairs, "
           f"up to {minutes:.1f} min each ({len(jobs) * minutes / 60:.1f} h one after another)")
     for radio in radios:
         print(f"  {radio:22} {', '.join(exemplars[radio])}")
