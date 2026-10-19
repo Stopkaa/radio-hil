@@ -71,9 +71,11 @@ the laptop from going to sleep.
    radio gets its own folder: `<riotbase>/build/interop/<commit>/<radio>/`.
    So a run on another RIOT version (e.g. `--riotbase ~/RIOT-master`) does not
    touch these builds.
-2. **Initial flash**: all boards on, flash all at the same time, all off. A
-   board that is more than one radio (OpenMote-B) gets the first one in
-   `radios.yaml`; the other one is flashed when a run needs it.
+2. **Initial flash**: the needed boards on, flash all at the same time, all
+   off. A board that fails is power cycled and flashed once more; if that
+   fails too, it is tried again when a run needs it. A board that is more
+   than one radio (OpenMote-B) gets the first one in `radios.yaml`; the other
+   one is flashed when a run needs it.
 3. **Runs**: one run is one direction of a pair. Only the two boards of a run
    are on. The run sets the channel on both boards, pings `short`, then
    `long`, checks `pktbuf` after each, and switches the boards off again. That
@@ -98,7 +100,7 @@ Every test gets a folder `interop-results/<date>-<time>-<commit>/`:
 | `flashed.json` | which radio firmware is on which board |
 | `logs/build-<radio>.log` | build output |
 | `logs/<n>-<sender>-to-<receiver>-<board>.log` | full shell output of both boards of a run |
-| `logs/flash.log` | output of the initial flash |
+| `logs/flash-<board>.log` | output of the initial flash |
 
 Results: `passed`, `failed` (loss >= 10 % or pktbuf not empty), `hang`
 (a shell did not answer), `error` (e.g. no 802.15.4 interface found),

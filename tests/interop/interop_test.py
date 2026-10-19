@@ -342,36 +342,48 @@ class Runner:
 
     # --- initial flash ---
 
+    def flash(self, name, radio, logfile):
+        """Flash one board (it must be on); on failure power cycle it and try
+        once more (e.g. 'No available nodes' while USB is still enumerating)."""
+        for attempt in (1, 2):
+            if radio_hil("flash", "-b", name, "-f", self.firmware[radio],
+                         logfile=logfile, check=False):
+                self.flashed[name] = radio
+                self.save_flashed()
+                return True
+            if attempt == 1:
+                log(f"flashing {name} failed, power cycling it and trying again")
+                with self.power_lock:
+                    radio_hil("reset", "-b", name, logfile=logfile, check=False)
+                time.sleep(max(BOOT_WAIT, 5))
+        self.flashed.pop(name, None)      # unknown state, flashed again when used
+        self.save_flashed()
+        log(f"flashing {name} failed, see {logfile}")
+        return False
+
     def initial_flash(self):
         """Flash every board with the first radio of its board type."""
-        jobs = {}
-        for radio, names in self.exemplars.items():
+        jobs = {}                             # {board name: radio}
+        for radio, names in self.exemplars.items():   # radios.yaml order
             for name in names:
-                if name not in self.flashed and radio in self.firmware:
-                    self.flashed[name] = radio
-                    jobs.setdefault(radio, []).append(name)
+                if name not in jobs and radio in self.firmware:
+                    jobs[name] = radio
         if not jobs:
             return
-        logfile = os.path.join(self.outdir, "logs", "flash.log")
-        log("power on all boards and flash them")
-        radio_hil("poweron", "-a", logfile=logfile)
-        time.sleep(BOOT_WAIT)
-        failed = []
-        def flash(item):
-            radio, names = item
-            if not radio_hil("flash", "-b", *names, "-f", self.firmware[radio],
-                             logfile=logfile):
-                failed.extend(names)
-        threads = [threading.Thread(target=flash, args=(item,)) for item in jobs.items()]
+        logdir = os.path.join(self.outdir, "logs")
+        log(f"power on {len(jobs)} boards and flash them")
+        self.power("poweron", list(jobs))
+        time.sleep(max(BOOT_WAIT, 10))      # many boards enumerate at once
+        threads = [threading.Thread(target=self.flash,
+                                    args=(name, radio, os.path.join(logdir, f"flash-{name}.log")))
+                   for name, radio in jobs.items()]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        for name in failed:
-            del self.flashed[name]            # unknown state, flashed again when used
+        failed = sorted(n for n in jobs if self.flashed.get(n) != jobs[n])
         if failed:
-            log(f"flashing failed for {', '.join(sorted(failed))}, see {logfile}")
-        self.save_flashed()
+            log(f"not flashed: {', '.join(failed)} (tried again when a run needs them)")
 
     # --- scheduling ---
 
@@ -463,13 +475,16 @@ class Runner:
             reason = f" ({values['error']})" if "error" in values else ""
             log(f"{result:7} {tag} {phase}{extra}{reason}")
 
-        def skip_rest(reason):
+        def skip_rest(reason, first="skipped"):
+            """Record the ping runs not done yet; the first one as 'first'."""
             for phase, _ in phases:
                 if phase not in done:
-                    finish(phase, "skipped", error=reason)
+                    finish(phase, first, error=reason)
+                    first = "skipped"
+                    reason = "previous ping did not pass"
 
         if not self.power("poweron", (src, dst)):
-            skip_rest("poweron failed")
+            skip_rest("poweron failed", first="error")
             self.power("poweroff", (src, dst))
             return
         nodes = []
@@ -478,12 +493,8 @@ class Runner:
             for name, radio in ((src, job["src"]), (dst, job["dst"])):
                 if self.flashed.get(name) != radio:
                     log(f"flash  {name} with {radio}")
-                    if not radio_hil("flash", "-b", name, "-f", self.firmware[radio],
-                                     logfile=f"{prefix}-flash.log"):
-                        self.flashed.pop(name, None)
+                    if not self.flash(name, radio, f"{prefix}-flash.log"):
                         raise RuntimeError(f"flashing {name} failed")
-                    self.flashed[name] = radio
-                    self.save_flashed()
             pinger = Node(src, f"{prefix}-{src}.log")
             pinged = Node(dst, f"{prefix}-{dst}.log")
             nodes = [pinger, pinged]
@@ -494,7 +505,7 @@ class Runner:
             for node in nodes:
                 node.setup(job["band"], channel)
         except Exception as exc:          # Hang, RuntimeError, no riotctrl, ...
-            skip_rest(str(exc) or repr(exc))
+            skip_rest(str(exc) or repr(exc), first="error")
             self.close(nodes, src, dst)
             return
 
@@ -719,7 +730,8 @@ def main():
             firmware[radio] = build(cfg, radio, riotbase, args.commit,
                                     os.path.join(outdir, "logs"))
 
-    runner = Runner(cfg, args, jobs, {r: exemplars[r] for r in needed}, firmware, outdir)
+    runner = Runner(cfg, args, jobs, {r: exemplars[r] for r in radios if r in needed},
+                    firmware, outdir)
     flashed_file = os.path.join(outdir, "flashed.json")
     if args.skip_flash:
         if os.path.exists(flashed_file):
