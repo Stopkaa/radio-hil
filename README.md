@@ -143,6 +143,15 @@ same time. With several boards, every output line starts with `[board name]`.
 
 `radio-hil <command> -h` shows the options of each command.
 
+## Interop test
+
+[`tests/interop`](tests/interop/README.md) lets every IEEE 802.15.4 radio in
+the HIL ping every other one, in both directions:
+
+```sh
+python tests/interop/interop_test.py --riotbase ~/RIOT --dut nrf52840dk
+```
+
 ## Board names
 
 A board is called `<RIOT board>-<n>`, where `n` is the number of the Pi it is

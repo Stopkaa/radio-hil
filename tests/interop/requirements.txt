@@ -1,0 +1,3 @@
+# riotctrl_shell is not installed: it comes from $RIOTBASE/dist/pythonlibs
+pyyaml
+riotctrl
