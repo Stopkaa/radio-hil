@@ -59,11 +59,20 @@ phys:
 # pairs that are not tested, e.g. [[frdm-kw41z, mrf24j40]]
 exclude: []
 
-# ping phases, run in this order; a phase only runs if the one before passed
+# Ping runs per direction, in this order. Add, remove or change entries;
+# with --pings NAME only some of them run (e.g. --pings short).
 test:
-  phases:
-    short: {size: 10, count: 10000, interval: 30}     # unfragmented, ~5 min
-    long: {size: 1024, count: 10000, interval: 300}   # fragmented, ~50 min
-  max_loss: 10          # percent; a phase passes below this
-  pktbuf_wait: 10       # seconds to wait after a ping before checking pktbuf
+  pings:
+    - name: short                  # unfragmented, ~5 min
+      size: 10                     # ping -s, payload in bytes
+      count: 10000                 # ping -c
+      interval: 30                 # ping -i, ms between pings
+    - name: long                   # fragmented, ~50 min
+      size: 1024
+      count: 10000
+      interval: 300
+  # optional per ping: timeout (ms, ping -W) and max_loss, otherwise these:
   ping_timeout: 1000    # ms, ping -W
+  max_loss: 10          # percent; a ping run passes below this
+  pktbuf_wait: 10       # seconds to wait after a ping before checking pktbuf
+  stop_on_fail: true    # true: the next ping run only runs if this one passed

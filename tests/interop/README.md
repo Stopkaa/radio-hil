@@ -2,16 +2,18 @@
 
 Checks that the IEEE 802.15.4 radios in the HIL work with each other. Every
 pair of radios pings in both directions, like
-[Release-Spec 04](https://github.com/RIOT-OS/Release-Specs/blob/master/04-single-hop-6lowpan-icmp/test_spec04.py):
+[Release-Spec 04](https://github.com/RIOT-OS/Release-Specs/blob/master/04-single-hop-6lowpan-icmp/test_spec04.py).
+Which pings run is set in `radios.yaml` (see [Ping runs](#ping-runs)), by
+default:
 
-| Phase | Shell command | Duration |
+| Ping run | Shell command | Duration |
 |---|---|---|
 | `short` (unfragmented) | `ping <addr> -s 10 -c 10000 -i 30` | ~5 min |
 | `long` (fragmented) | `ping <addr> -s 1024 -c 10000 -i 300` | ~50 min |
 
-`long` only runs if `short` passed in that direction. A phase passes if the
-packet loss is below 10 % and the packet buffer (`pktbuf`) of both boards is
-empty 10 s after the ping. If a shell does not answer anymore, the phase is a
+`long` only runs if `short` passed in that direction. A ping run passes if
+the packet loss is below 10 % and the packet buffer (`pktbuf`) of both boards
+is empty 10 s after the ping. If a shell does not answer anymore, it is a
 `hang`.
 
 The script runs on your laptop. It builds and powers the boards with
@@ -40,6 +42,7 @@ From your RIOT checkout (or give it with `--riotbase`):
 cd ~/RIOT
 python ~/radio-hil/tests/interop/interop_test.py --dry-run           # only show the plan
 python ~/radio-hil/tests/interop/interop_test.py --count 100 --radios nrf52840dk samr21-xpro
+python ~/radio-hil/tests/interop/interop_test.py --pings short      # only the short ping
 python ~/radio-hil/tests/interop/interop_test.py --dut nrf52840dk    # only pairs with the nrf52840dk
 python ~/radio-hil/tests/interop/interop_test.py                     # everyone against everyone
 ```
@@ -52,7 +55,8 @@ the laptop from going to sleep.
 | `--riotbase DIR` | RIOT checkout to build from (default: current folder) |
 | `--dut RADIO` | only the pairs with this radio |
 | `--radios R1 R2 ...` | only these radios |
-| `--count N` | pings per phase, for a quick check |
+| `--pings NAME ...` | only these ping runs from `radios.yaml`, e.g. `--pings short` |
+| `--count N` | pings per ping run (instead of `count`), for a quick check |
 | `--no-parallel` | one run at a time |
 | `--results DIR` | where the result folders go (default: `interop-results`) |
 | `--resume DIR` | continue an aborted test, see below |
@@ -87,8 +91,8 @@ Every test gets a folder `interop-results/<date>-<time>-<commit>/`:
 
 | File | |
 |---|---|
-| `summary.md` | table of all runs: sender, receiver, band, channel, phase, result, loss, RTT, pktbuf |
-| `results.jsonl` | one line per run and phase with all values |
+| `summary.md` | table of all runs: sender, receiver, band, channel, ping run, result, loss, RTT, pktbuf |
+| `results.jsonl` | one line per run and ping run with all values |
 | `plan.json` | commit, options, boards and the planned runs |
 | `flashed.json` | which radio firmware is on which board |
 | `logs/build-<radio>.log` | build output |
@@ -97,13 +101,40 @@ Every test gets a folder `interop-results/<date>-<time>-<commit>/`:
 
 Results: `passed`, `failed` (loss >= 10 % or pktbuf not empty), `hang`
 (a shell did not answer), `error` (e.g. no 802.15.4 interface found),
-`skipped` (the phase before did not pass). The script exits with 0 only if
+`skipped` (the ping run before did not pass). The script exits with 0 only if
 everything passed.
 
-**Resume:** results are saved after every phase. After `Ctrl+C` (all boards
+**Resume:** results are saved after every ping run. After `Ctrl+C` (all boards
 are switched off) or a crash, run the same command again with
 `--resume <result folder>`; finished runs are skipped. With `--skip-build
 --skip-flash` it starts right away.
+
+## Ping runs
+
+The `test` section of `radios.yaml` has a list `pings`: one entry per ping
+run, done one after another in each direction. Add, remove or change entries
+as you like:
+
+```yaml
+test:
+  pings:
+    - name: short        # name in the report and for --pings
+      size: 10           # ping -s, payload in bytes
+      count: 10000       # ping -c
+      interval: 30       # ping -i, ms between pings
+    - name: long
+      size: 1024
+      count: 10000
+      interval: 300
+      max_loss: 5        # optional, only for this ping run
+  ping_timeout: 1000     # ms, ping -W (per ping run: timeout)
+  max_loss: 10           # percent, a ping run passes below this
+  pktbuf_wait: 10        # s after a ping before pktbuf is checked
+  stop_on_fail: true     # next ping run only if this one passed
+```
+
+`--pings short` runs only some of them (always in the order of the file),
+`--count 100` changes `count` of all of them.
 
 ## Adding a radio
 
@@ -120,4 +151,4 @@ radios:
 `make` variables are passed as environment variables, so they add to what
 the board sets (`USEMODULE`, `CFLAGS`, `DISABLE_MODULE`, ...). Pairs that
 should not run go into `exclude`, e.g. `exclude: [[frdm-kw41z, mrf24j40]]`.
-The ping parameters are in the `test` section.
+The ping parameters are in the `test` section, see [Ping runs](#ping-runs).

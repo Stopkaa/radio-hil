@@ -10,6 +10,7 @@ fragmented. Pairs on different channels and bands run at the same time.
 Examples:
     interop_test.py --riotbase ~/RIOT --dry-run
     interop_test.py --riotbase ~/RIOT --count 100 --radios nrf52840dk samr21-xpro
+    interop_test.py --riotbase ~/RIOT --pings short
     interop_test.py --riotbase ~/RIOT --dut nrf52840dk
     interop_test.py --riotbase ~/RIOT --resume interop-results/20261019-120000-1a2b3c4
 
@@ -76,6 +77,20 @@ def load_config(path):
         if phy.get("band") not in BAND_CHANNELS or not phy.get("channels"):
             die(f"{path}: phy '{name}' needs band ({'/'.join(BAND_CHANNELS)}) and channels")
     cfg["exclude"] = {frozenset(pair) for pair in cfg.get("exclude") or []}
+    # test.pings: list of ping runs, in this order -> {name: settings}
+    pings = cfg["test"].get("pings") or []
+    if not pings:
+        die(f"{path}: 'test.pings' is empty")
+    cfg["test"]["phases"] = {}
+    for n, ping in enumerate(pings, start=1):
+        ping = dict(ping)
+        name = str(ping.pop("name", f"ping{n}"))
+        missing = [k for k in ("size", "count", "interval") if k not in ping]
+        if missing:
+            die(f"{path}: ping '{name}' needs {', '.join(missing)}")
+        if name in cfg["test"]["phases"]:
+            die(f"{path}: ping name '{name}' used twice")
+        cfg["test"]["phases"][name] = ping
     return cfg
 
 
@@ -271,7 +286,7 @@ def ping(pinger, pinged, phase, test):
     """Ping phase; returns the measured values (raises Hang)."""
     from riotctrl_shell.gnrc import GNRCICMPv6EchoParser
     count, interval, size = phase["count"], phase["interval"], phase["size"]
-    wait = test.get("ping_timeout", 1000)
+    wait = phase.get("timeout", test.get("ping_timeout", 1000))
     line = (f"ping {pinged.addr}%{pinger.netif} -c {count} -i {interval} "
             f"-s {size} -W {wait}")
     # all pings plus 50 % reserve and a minute, then it counts as hang
@@ -499,14 +514,15 @@ class Runner:
                 except RuntimeError as exc:
                     finish(phase, "error", error=str(exc), duration=round(time.monotonic() - start))
                     break
-                ok = values["loss"] < test.get("max_loss", 10) and all(empty.values())
+                max_loss = params.get("max_loss", test.get("max_loss", 10))
+                ok = values["loss"] < max_loss and all(empty.values())
                 finish(phase, "passed" if ok else "failed", **values,
                        pktbuf_empty=empty, duration=round(time.monotonic() - start),
                        size=params["size"], count=params["count"],
                        interval=params["interval"])
-                if not ok:
+                if not ok and test.get("stop_on_fail", True):
                     break
-            skip_rest("previous phase did not pass")
+            skip_rest("previous ping did not pass")
         finally:
             # no retries: the boards are switched off after every run, which
             # also resets them for the next one
@@ -577,7 +593,7 @@ def write_summary(outdir, jobs, cfg):
     lines = [f"# Interop test {os.path.basename(outdir)}", "",
              f"RIOT commit: `{commit}`", "",
              "Result: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())), "",
-             "| Sender | Receiver | Band | Channel | Phase | Result | Loss % | rx/tx "
+             "| Sender | Receiver | Band | Channel | Ping | Result | Loss % | rx/tx "
              "| RTT min/avg/max ms | pktbuf | Duration s | Note |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|", *rows, ""]
     with open(os.path.join(outdir, "summary.md"), "w") as fh:
@@ -595,7 +611,9 @@ def main():
                    help="RIOT checkout to build from (default: current folder)")
     p.add_argument("--dut", metavar="RADIO", help="only pairs with this radio")
     p.add_argument("--radios", nargs="+", metavar="RADIO", help="only these radios")
-    p.add_argument("--count", type=int, help="pings per phase (instead of radios.yaml)")
+    p.add_argument("--pings", nargs="+", metavar="NAME",
+                   help="only these ping runs of radios.yaml (e.g. --pings short)")
+    p.add_argument("--count", type=int, help="pings per run (instead of radios.yaml)")
     p.add_argument("--no-parallel", action="store_true", help="one run at a time")
     p.add_argument("--results", default="interop-results",
                    help="folder for the result folders (default: interop-results)")
@@ -608,6 +626,12 @@ def main():
     args = p.parse_args()
 
     cfg = load_config(args.radios_file)
+    if args.pings:
+        known = cfg["test"]["phases"]
+        unknown = [n for n in args.pings if n not in known]
+        if unknown:
+            die(f"unknown ping run {', '.join(unknown)} (known: {', '.join(known)})")
+        cfg["test"]["phases"] = {n: v for n, v in known.items() if n in args.pings}
     riotbase = os.path.abspath(os.path.expanduser(args.riotbase))
     if not os.path.isdir(os.path.join(riotbase, APP)):
         die(f"{riotbase} is not a RIOT checkout ({APP} missing), use --riotbase")
@@ -636,6 +660,8 @@ def main():
     phases = cfg["test"]["phases"]
     minutes = sum((args.count or ph["count"]) * ph["interval"] for ph in phases.values()) / 60000
     print(f"RIOT {args.commit} in {riotbase}")
+    for name, ph in phases.items():
+        print(f"  ping {name:8} -s {ph['size']} -c {args.count or ph['count']} -i {ph['interval']}")
     print(f"{len(jobs)} directions of {len(jobs) // 2} pairs, "
           f"up to {minutes:.1f} min each ({len(jobs) * minutes / 60:.1f} h one after another)")
     for radio in radios:
