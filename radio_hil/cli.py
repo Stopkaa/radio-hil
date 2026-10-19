@@ -271,20 +271,37 @@ def cmd_list():
 
 # --- flash / build-flash ----------------------------------------------------
 
+# ESP boards flash the bootloader and partition table from BINDIR, too
+ESP_FILES = ("partitions.bin", "esp_bootloader/bootloader.bin")
+
+
 def flash(name, firmware, prefix=""):
     """Copy firmware to the board's Pi and flash it, returns True on success."""
     e = entry(name)
     host, uid = e["host"], e["uid"]
-    remote = f"/tmp/{getpass.getuser()}-{name}{os.path.splitext(firmware)[1]}"
-    if subprocess.run(["scp", *SSH_OPTS, "-q", firmware, f"{host}:{remote}"]).returncode != 0:
+    fw_dir = os.path.dirname(os.path.abspath(firmware))
+    files = [os.path.basename(firmware)]
+    esp = all(os.path.isfile(os.path.join(fw_dir, f)) for f in ESP_FILES)
+    if esp:
+        files += ESP_FILES
+    # copy the files into an own folder on the Pi, keeping their layout
+    remote_dir = f"/tmp/{getpass.getuser()}-{name}"
+    tar = subprocess.Popen(["tar", "-C", fw_dir, "-cf", "-", *files], stdout=subprocess.PIPE)
+    copy = subprocess.run(["ssh", *SSH_OPTS, host,
+                           f"rm -rf {remote_dir} && mkdir -p {remote_dir} && "
+                           f"tar -C {remote_dir} -xf -"], stdin=tar.stdout)
+    tar.stdout.close()
+    if tar.wait() != 0 or copy.returncode != 0:
         warn(f"copying the firmware to {host} failed")
         return False
+    remote = f"{remote_dir}/{files[0]}"
     adapter = "" if e["board"] in NO_ADAPTER_ID else "DEBUG_ADAPTER_ID=$NM_SERIAL "
-    make = (f"make -C {PI_APP} BOARD=$NM_BOARD {adapter}PORT={port_of(e['board'])} "
+    bindir = f"BINDIR={remote_dir} " if esp else ""
+    make = (f"make -C {PI_APP} BOARD=$NM_BOARD {adapter}{bindir}PORT={port_of(e['board'])} "
             f"FLASHFILE={remote} flash-only")
     # remove the copied firmware afterwards, whatever the result
     res = ssh_stream(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}; "
-                           f"rm -f {shlex.quote(remote)}", prefix)
+                           f"rm -rf {shlex.quote(remote_dir)}", prefix)
     if "RESULT:" not in res:
         warn(f"'{name}' was not flashed, it is in use by someone else or not connected")
         return False
