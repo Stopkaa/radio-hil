@@ -120,6 +120,14 @@ RIOT shell of a board (tmux, close with `Ctrl+B` then `&`):
 radio-hil term nrf52840dk-1
 ```
 
+Raw serial connection for scripts (no tmux, no lock), e.g. for `riotctrl`.
+It needs `socat` on the Pis (`sudo pacman -S socat`). In a terminal, leave it
+with `Enter`, `~`, `.`:
+
+```sh
+radio-hil serial nrf52840dk-1
+```
+
 Reset and power:
 
 ```sh
@@ -147,7 +155,7 @@ cannot be told apart, so only one of them per Pi.
 
 ## Good to know
 
-- **Locking**: `term`, `flash` and `build-flash` lock the board. If someone
+- **Locking**: `term`, `flash` and `build-flash` lock the board, `serial` does not. If someone
   else is using it, flashing is refused. `reset`, `poweron` and `poweroff` do **not** check
   locks, so make sure nobody else is working on the board.
 - **Firmware format**: `flash` needs the file the board's flasher expects,

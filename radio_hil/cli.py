@@ -8,6 +8,7 @@ Examples:
     radio-hil flash -b nrf52840dk-1 nrf52840dk-2 -f app.elf
     radio-hil build-flash -b nrf52840dk-2 frdm-kw41z-1 -f examples/basic/hello-world
     radio-hil term nrf52840dk-1
+    radio-hil serial nrf52840dk-1          (raw serial over stdin/stdout, for scripts)
     radio-hil reset -b nrf52840dk-1        (or -a for all, -u for all in use)
     radio-hil poweroff -a                  (or -b <names>, -u)
     radio-hil poweron -b frdm-kw41z-1
@@ -356,6 +357,38 @@ def cmd_term(name):
                    f"-x {shlex.quote(make)}", tty=True)
 
 
+# --- serial -----------------------------------------------------------------
+
+SERIAL_BAUD = 115200
+
+
+def serial_port(e):
+    """Device path of the board's serial port on its Pi (e.g. /dev/ttyACM1)."""
+    var = PORT_VAR.get(e["board"], "NM_PORT")
+    # -F: do not lock the board, only ask inet-nm for its port
+    res = ssh(e["host"], f"inet-nm-exec -F 'echo RADIO_HIL_PORT=${var}' -d {e['uid']}",
+              capture=True)
+    m = re.search(r"RADIO_HIL_PORT=(/dev/\S+)", res.stdout)
+    if not m:
+        die(f"could not find the serial port of the board on {e['host']}:\n"
+            f"{res.stdout}{res.stderr}")
+    return m.group(1)
+
+
+def cmd_serial(name):
+    """Connect stdin/stdout to the board's serial port, without tmux and locks.
+
+    Meant for scripts (riotctrl/pexpect) that need the raw RIOT shell. On a
+    terminal it works too; leave with Enter, then ~ and . (ssh escape)."""
+    e = entry(name)
+    port = serial_port(e)
+    # -tt: a terminal on both ends, so no local echo and no line buffering;
+    # socat puts the remote terminal into raw mode and copies bytes 1:1.
+    remote = f"socat STDIO,rawer {shlex.quote(port)},b{SERIAL_BAUD},rawer"
+    sys.stdout.flush()
+    os.execvp("ssh", ["ssh", *SSH_OPTS, "-tt", "-o", "LogLevel=QUIET", e["host"], remote])
+
+
 # --- power / reset ----------------------------------------------------------
 
 def power(action, names, all_boards, in_use, pis=None):
@@ -413,6 +446,9 @@ def main():
     p = sub.add_parser("term", help="open the RIOT shell of a board")
     completer(p.add_argument("board", metavar="NAME"), complete_boards)
 
+    p = sub.add_parser("serial", help="raw serial connection to a board (for scripts)")
+    completer(p.add_argument("board", metavar="NAME"), complete_boards)
+
     for cmd, text in (("reset", "power cycle boards (off and on again)"),
                       ("poweron", "switch the USB power of boards on"),
                       ("poweroff", "switch the USB power of boards off")):
@@ -439,6 +475,8 @@ def main():
         cmd_build_flash(args.boards, args.folder)
     elif args.cmd == "term":
         cmd_term(args.board)
+    elif args.cmd == "serial":
+        cmd_serial(args.board)
     elif args.cmd == "reset":
         power("reset", args.boards, args.all, args.used, args.pis)
     elif args.cmd == "poweron":
