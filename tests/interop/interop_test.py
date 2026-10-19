@@ -672,6 +672,12 @@ def main():
         print(f"  {job['src']:>22} -> {job['dst']:22} {job['phy']}")
     if args.dry_run:
         return
+    try:
+        shell_classes()
+    except ImportError as exc:
+        die(f"{exc.name or exc} is missing in this Python ({sys.executable}).\n"
+            f"Install it with: {sys.executable} -m pip install -r {HERE}/requirements.txt\n"
+            f"(riotctrl_shell comes from {riotbase}/dist/pythonlibs)")
 
     # result folder
     if args.resume:
