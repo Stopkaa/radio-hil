@@ -374,16 +374,19 @@ class Runner:
         log(f"power on {len(jobs)} boards and flash them")
         self.power("poweron", list(jobs))
         time.sleep(max(BOOT_WAIT, 10))      # many boards enumerate at once
-        threads = [threading.Thread(target=self.flash,
+        threads = [threading.Thread(target=self.flash, daemon=True,
                                     args=(name, radio, os.path.join(logdir, f"flash-{name}.log")))
                    for name, radio in jobs.items()]
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            while t.is_alive():               # join() with timeout: Ctrl-C works
+                t.join(0.5)
         failed = sorted(n for n in jobs if self.flashed.get(n) != jobs[n])
         if failed:
             log(f"not flashed: {', '.join(failed)} (tried again when a run needs them)")
+            log("'No available nodes!' in a flash log: the board is locked "
+                "(ls /tmp/inet_nm/locks on its Pi) or not seen on USB (dmesg on its Pi)")
 
     # --- scheduling ---
 
@@ -733,7 +736,7 @@ def main():
     runner = Runner(cfg, args, jobs, {r: exemplars[r] for r in radios if r in needed},
                     firmware, outdir)
     flashed_file = os.path.join(outdir, "flashed.json")
-    if args.skip_flash:
+    if args.skip_flash:                 # no initial flash
         if os.path.exists(flashed_file):
             with open(flashed_file) as fh:
                 runner.flashed = json.load(fh)
@@ -741,11 +744,10 @@ def main():
             for radio, names in runner.exemplars.items():
                 for name in names:
                     runner.flashed.setdefault(name, radio)
-    else:
-        runner.initial_flash()
-    radio_hil("poweroff", "-a")
-
     try:
+        if not args.skip_flash:
+            runner.initial_flash()
+        radio_hil("poweroff", "-a")
         runner.run(pending)
     except KeyboardInterrupt:
         log("aborted, switching all boards off (continue with --resume)")
