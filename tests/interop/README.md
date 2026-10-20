@@ -73,8 +73,9 @@ the laptop from going to sleep.
    So a run on another RIOT version (e.g. `--riotbase ~/RIOT-master`) does not
    touch these builds.
 2. **Initial flash**: on every Pi, up to `--boards-per-pi` boards at a time
-   are switched on, flashed and switched off again (the Pis at the same
-   time). With too many boards on, the USB controller of the Pi runs out of
+   are switched on, flashed one after another and switched off again (the
+   Pis at the same time). Only one board per Pi is flashed at a time, also
+   during the runs: two flashers at once can take the wrong debugger. With too many boards on, the USB controller of the Pi runs out of
    bandwidth ("Not enough bandwidth" in `dmesg`) and boards disappear. A board that fails is power cycled and flashed once more; if that
    fails too, it is tried again when a run needs it. A board that is more
    than one radio (OpenMote-B) gets the first one in `radios.yaml`; the other

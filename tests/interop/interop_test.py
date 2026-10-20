@@ -326,6 +326,9 @@ class Runner:
             for ch in phy["channels"])) for band in BAND_CHANNELS}
         self.running = 0
         self.power_lock = threading.Lock()
+        # one flash at a time per Pi: two OpenOCD/edbg at once can grab the
+        # wrong debugger (pba-d-01-kw2x is flashed without adapter serial)
+        self.flash_locks = {h: threading.Lock() for h in set(self.host.values())}
         self.results_lock = threading.Lock()
         self.nodes = set()                # open shells, closed on Ctrl-C
         self.counter = itertools.count(1)
@@ -354,8 +357,10 @@ class Runner:
         """Flash one board (it must be on); on failure power cycle it and try
         once more (e.g. 'No available nodes' while USB is still enumerating)."""
         for attempt in (1, 2):
-            if radio_hil("flash", "-b", name, "-f", self.firmware[radio],
-                         logfile=logfile, check=False):
+            with self.flash_locks[self.host[name]]:
+                ok = radio_hil("flash", "-b", name, "-f", self.firmware[radio],
+                               logfile=logfile, check=False)
+            if ok:
                 self.flashed[name] = radio
                 self.save_flashed()
                 return True
@@ -385,20 +390,16 @@ class Runner:
         by_pi = {}
         for name in jobs:
             by_pi.setdefault(self.host[name], []).append(name)
-        log(f"flashing {len(jobs)} boards, at most {self.per_pi} per Pi at once")
+        log(f"flashing {len(jobs)} boards one after another per Pi "
+            f"(at most {self.per_pi} on at once)")
 
         def flash_pi(names):
             for i in range(0, len(names), self.per_pi):
                 batch = names[i:i + self.per_pi]
                 self.power("poweron", batch)
                 time.sleep(max(BOOT_WAIT, 5))
-                threads = [threading.Thread(
-                    target=self.flash, daemon=True,
-                    args=(n, jobs[n], os.path.join(logdir, f"flash-{n}.log"))) for n in batch]
-                for t in threads:
-                    t.start()
-                for t in threads:
-                    t.join()
+                for n in batch:               # one after another
+                    self.flash(n, jobs[n], os.path.join(logdir, f"flash-{n}.log"))
                 self.power("poweroff", batch)
 
         threads = [threading.Thread(target=flash_pi, args=(names,), daemon=True)
