@@ -121,8 +121,7 @@ radio-hil term nrf52840dk-1
 ```
 
 Raw serial connection for scripts (no tmux, no lock), e.g. for `riotctrl`.
-It needs `socat` on the Pis (`sudo pacman -S socat`). In a terminal, leave it
-with `Enter`, `~`, `.`:
+In a terminal, leave it with `Ctrl+C`:
 
 ```sh
 radio-hil serial nrf52840dk-1

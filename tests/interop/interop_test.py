@@ -217,7 +217,8 @@ def shell_classes():
     class HilCtrl(RIOTCtrl):
         """RIOTCtrl whose terminal is 'radio-hil serial <name>'."""
         def __init__(self, name):
-            super().__init__(env={"BOARD": name})
+            # RADIO_HIL_SCRIPT: Ctrl+C bytes go to the board, raw mode only
+            super().__init__(env={"BOARD": name, "RADIO_HIL_SCRIPT": "1"})
             self.name = name
 
         def make_command(self, targets):

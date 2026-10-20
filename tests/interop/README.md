@@ -23,7 +23,7 @@ The script runs on your laptop. It builds and powers the boards with
 ## Setup
 
 1. `radio-hil` installed and working (`radio-hil fetch` shows the boards).
-2. `socat` on all Pis: `sudo pacman -S socat`.
+2. `python3` on all Pis (used by `radio-hil serial`).
 3. In the same Python environment as `radio-hil`:
 
    ```sh

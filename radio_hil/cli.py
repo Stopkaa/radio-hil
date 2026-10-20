@@ -392,16 +392,51 @@ def serial_port(e):
     return m.group(1)
 
 
+# Runs on the Pi: copies bytes between stdin/stdout and the serial port,
+# both in raw mode (like 'stty raw -echo'). Python instead of socat, which
+# did not get answers from the boards. With -i (a person at a terminal),
+# Ctrl+C ends it.
+SERIAL_BRIDGE = r"""
+import os, select, sys, termios, tty
+port, baud, interactive = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "-i"
+fd = os.open(port, os.O_RDWR | os.O_NOCTTY)
+tty.setraw(fd, termios.TCSANOW)      # TCSANOW: keep what arrived
+a = termios.tcgetattr(fd)
+a[4] = a[5] = getattr(termios, "B%d" % baud)
+a[2] = (a[2] | termios.CLOCAL | termios.CREAD) & ~termios.CRTSCTS
+termios.tcsetattr(fd, termios.TCSANOW, a)
+if os.isatty(0):
+    tty.setraw(0, termios.TCSANOW)
+while True:
+    ready = select.select([0, fd], [], [])[0]
+    if 0 in ready:
+        data = os.read(0, 4096)
+        if not data or (interactive and b"\x03" in data):
+            break
+        os.write(fd, data)
+    if fd in ready:
+        data = os.read(fd, 4096)
+        if not data:
+            break
+        os.write(1, data)
+"""
+
+
 def cmd_serial(name):
     """Connect stdin/stdout to the board's serial port, without tmux and locks.
 
     Meant for scripts (riotctrl/pexpect) that need the raw RIOT shell. On a
-    terminal it works too; leave with Enter, then ~ and . (ssh escape)."""
+    terminal it works too; leave with Ctrl+C."""
     e = entry(name)
     port = serial_port(e)
-    # -tt: a terminal on both ends, so no local echo and no line buffering;
-    # socat puts the remote terminal into raw mode and copies bytes 1:1.
-    remote = f"socat STDIO,rawer {shlex.quote(port)},b{SERIAL_BAUD},rawer"
+    # scripts (pexpect) also have a terminal, they set RADIO_HIL_SCRIPT=1
+    script = os.environ.get("RADIO_HIL_SCRIPT") or not sys.stdin.isatty()
+    interactive = "-" if script else "-i"
+    # -tt: a terminal on both ends, so no local echo and no line buffering
+    remote = (f"python3 -c {shlex.quote(SERIAL_BRIDGE)} "
+              f"{shlex.quote(port)} {SERIAL_BAUD} {interactive}")
+    if interactive == "-i":
+        print(f"{name}: {port} on {e['host']}, leave with Ctrl+C", file=sys.stderr)
     sys.stdout.flush()
     os.execvp("ssh", ["ssh", *SSH_OPTS, "-tt", "-o", "LogLevel=QUIET", e["host"], remote])
 
