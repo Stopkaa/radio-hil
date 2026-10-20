@@ -377,8 +377,9 @@ class Runner:
     def initial_flash(self):
         """Flash every board with the first radio of its board type.
 
-        Per Pi only --boards-per-pi boards are on at once: too many USB
-        devices at once make the Pi's USB controller run out of bandwidth."""
+        Per Pi one board at a time is switched on, flashed and switched off:
+        too many USB devices at once make the Pi's USB controller run out of
+        bandwidth, and two flashers at once can take the wrong debugger."""
         jobs = {}                             # {board name: radio}
         for radio, names in self.exemplars.items():   # radios.yaml order
             for name in names:
@@ -390,17 +391,17 @@ class Runner:
         by_pi = {}
         for name in jobs:
             by_pi.setdefault(self.host[name], []).append(name)
-        log(f"flashing {len(jobs)} boards one after another per Pi "
-            f"(at most {self.per_pi} on at once)")
+        log(f"flashing {len(jobs)} boards: per Pi one at a time "
+            f"(on, flash, off), the Pis at the same time")
 
         def flash_pi(names):
-            for i in range(0, len(names), self.per_pi):
-                batch = names[i:i + self.per_pi]
-                self.power("poweron", batch)
+            for i, n in enumerate(names, start=1):
+                self.power("poweron", [n])
                 time.sleep(max(BOOT_WAIT, 5))
-                for n in batch:               # one after another
-                    self.flash(n, jobs[n], os.path.join(logdir, f"flash-{n}.log"))
-                self.power("poweroff", batch)
+                ok = self.flash(n, jobs[n], os.path.join(logdir, f"flash-{n}.log"))
+                self.power("poweroff", [n])
+                if ok:
+                    log(f"flashed {n} with {jobs[n]} ({i}/{len(names)} on {self.host[n]})")
 
         threads = [threading.Thread(target=flash_pi, args=(names,), daemon=True)
                    for names in by_pi.values()]
