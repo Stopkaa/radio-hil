@@ -94,6 +94,12 @@ def load_config(path):
     return cfg
 
 
+def load_hosts():
+    """{board name: Pi host}, from 'radio-hil fetch'."""
+    with open(BOARDS_CACHE) as fh:
+        return {name: entry["host"] for name, entry in json.load(fh).items()}
+
+
 def load_exemplars(cfg):
     """{radio: [board names in the HIL]}, from 'radio-hil fetch'."""
     with open(BOARDS_CACHE) as fh:
@@ -311,6 +317,8 @@ class Runner:
         self.firmware = firmware          # {radio: flash file}
         self.outdir = outdir
         self.flashed = {}                 # {board name: radio}
+        self.host = load_hosts()          # {board name: Pi}
+        self.per_pi = args.boards_per_pi  # boards switched on at once per Pi
         self.cv = threading.Condition()
         self.busy = set()                 # board names in use
         self.free = {band: list(dict.fromkeys(
@@ -362,7 +370,10 @@ class Runner:
         return False
 
     def initial_flash(self):
-        """Flash every board with the first radio of its board type."""
+        """Flash every board with the first radio of its board type.
+
+        Per Pi only --boards-per-pi boards are on at once: too many USB
+        devices at once make the Pi's USB controller run out of bandwidth."""
         jobs = {}                             # {board name: radio}
         for radio, names in self.exemplars.items():   # radios.yaml order
             for name in names:
@@ -371,12 +382,27 @@ class Runner:
         if not jobs:
             return
         logdir = os.path.join(self.outdir, "logs")
-        log(f"power on {len(jobs)} boards and flash them")
-        self.power("poweron", list(jobs))
-        time.sleep(max(BOOT_WAIT, 10))      # many boards enumerate at once
-        threads = [threading.Thread(target=self.flash, daemon=True,
-                                    args=(name, radio, os.path.join(logdir, f"flash-{name}.log")))
-                   for name, radio in jobs.items()]
+        by_pi = {}
+        for name in jobs:
+            by_pi.setdefault(self.host[name], []).append(name)
+        log(f"flashing {len(jobs)} boards, at most {self.per_pi} per Pi at once")
+
+        def flash_pi(names):
+            for i in range(0, len(names), self.per_pi):
+                batch = names[i:i + self.per_pi]
+                self.power("poweron", batch)
+                time.sleep(max(BOOT_WAIT, 5))
+                threads = [threading.Thread(
+                    target=self.flash, daemon=True,
+                    args=(n, jobs[n], os.path.join(logdir, f"flash-{n}.log"))) for n in batch]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+                self.power("poweroff", batch)
+
+        threads = [threading.Thread(target=flash_pi, args=(names,), daemon=True)
+                   for names in by_pi.values()]
         for t in threads:
             t.start()
         for t in threads:
@@ -395,25 +421,26 @@ class Runner:
         channels = self.free[job["band"]]
         if not channels:
             return None
+        on = {}                               # boards switched on per Pi
+        for name in self.busy:
+            on[self.host[name]] = on.get(self.host[name], 0) + 1
+
         # prefer boards that already have the right firmware
-        def candidates(radio, taken):
-            names = [n for n in self.exemplars[radio] if n not in self.busy and n not in taken]
-            names.sort(key=natural)
+        def candidates(radio):
+            names = sorted((n for n in self.exemplars[radio] if n not in self.busy),
+                           key=natural)
             return sorted(names, key=lambda n: self.flashed.get(n) != radio)  # stable
-        src = candidates(job["src"], ())
-        if not src:
-            return None
-        dst = candidates(job["dst"], (src[0],))
-        if not dst:
-            # src[0] may be the only free board of the other radio, try the rest
-            for s in src[1:]:
-                dst = candidates(job["dst"], (s,))
-                if dst:
-                    src = [s]
-                    break
-            else:
-                return None
-        return src[0], dst[0], channels[0]
+
+        for src in candidates(job["src"]):
+            for dst in candidates(job["dst"]):
+                if dst == src:
+                    continue
+                extra = {}
+                for name in (src, dst):
+                    extra[self.host[name]] = extra.get(self.host[name], 0) + 1
+                if all(on.get(h, 0) + n <= self.per_pi for h, n in extra.items()):
+                    return src, dst, channels[0]
+        return None
 
     def run(self, pending):
         with self.cv:
@@ -630,6 +657,8 @@ def main():
                    help="only these ping runs of radios.yaml (e.g. --pings short)")
     p.add_argument("--count", type=int, help="pings per run (instead of radios.yaml)")
     p.add_argument("--no-parallel", action="store_true", help="one run at a time")
+    p.add_argument("--boards-per-pi", type=int, default=4, metavar="N",
+                   help="at most N boards switched on at once per Pi (default: 4)")
     p.add_argument("--results", default="interop-results",
                    help="folder for the result folders (default: interop-results)")
     p.add_argument("--resume", metavar="DIR", help="continue an aborted test in DIR")
@@ -640,6 +669,8 @@ def main():
     p.add_argument("--dry-run", action="store_true", help="only show the plan")
     args = p.parse_args()
 
+    if args.boards_per_pi < 2:
+        die("--boards-per-pi must be at least 2 (both boards of a run can be on one Pi)")
     cfg = load_config(args.radios_file)
     if args.pings:
         known = cfg["test"]["phases"]

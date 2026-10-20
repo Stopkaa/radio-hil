@@ -58,6 +58,7 @@ the laptop from going to sleep.
 | `--pings NAME ...` | only these ping runs from `radios.yaml`, e.g. `--pings short` |
 | `--count N` | pings per ping run (instead of `count`), for a quick check |
 | `--no-parallel` | one run at a time |
+| `--boards-per-pi N` | at most N boards on at once per Pi (default: 4) |
 | `--results DIR` | where the result folders go (default: `interop-results`) |
 | `--resume DIR` | continue an aborted test, see below |
 | `--skip-build` | use the firmware of an earlier build of the same RIOT commit |
@@ -71,8 +72,10 @@ the laptop from going to sleep.
    radio gets its own folder: `<riotbase>/build/interop/<commit>/<radio>/`.
    So a run on another RIOT version (e.g. `--riotbase ~/RIOT-master`) does not
    touch these builds.
-2. **Initial flash**: the needed boards on, flash all at the same time, all
-   off. A board that fails is power cycled and flashed once more; if that
+2. **Initial flash**: on every Pi, up to `--boards-per-pi` boards at a time
+   are switched on, flashed and switched off again (the Pis at the same
+   time). With too many boards on, the USB controller of the Pi runs out of
+   bandwidth ("Not enough bandwidth" in `dmesg`) and boards disappear. A board that fails is power cycled and flashed once more; if that
    fails too, it is tried again when a run needs it. A board that is more
    than one radio (OpenMote-B) gets the first one in `radios.yaml`; the other
    one is flashed when a run needs it.
@@ -81,7 +84,8 @@ the laptop from going to sleep.
    `long`, checks `pktbuf` after each, and switches the boards off again. That
    also resets them, there are no retries.
 
-Runs that share no board run at the same time, one per channel: 2.4 GHz on
+Runs that share no board run at the same time, one per channel and with
+at most `--boards-per-pi` boards on per Pi: 2.4 GHz on
 channels 15, 20 and 26 (between the WLAN channels 1/6/11), sub-GHz on channel
 0 (868.3 MHz, the only O-QPSK channel in the EU). If a radio has two
 exemplars, the two directions of a pair can run at the same time on swapped
