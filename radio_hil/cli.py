@@ -66,6 +66,19 @@ PORT_VAR = {"openmote-b": "NM_PORT_1"}
 # the pba-d-01-kw2x's DAPLink. Fine as long as each Pi has one of them.
 NO_ADAPTER_ID = {"pba-d-01-kw2x"}
 
+# Extra make variables for flashing on the Pi ({fw} = the copied firmware).
+# Boards with the Adafruit nRF52 bootloader flash with uf2conv by default,
+# which needs the bootloader's USB drive mounted, and nothing mounts it on
+# the Pis. adafruit-nrfutil flashes over the serial port instead (needs
+# 'adafruit-nrfutil' on the Pi and a .hex firmware).
+_NRFUTIL = "PROGRAMMER=adafruit-nrfutil HEXFILE={fw}"
+FLASH_VARS = {
+    "adafruit-feather-nrf52840-sense": _NRFUTIL,
+    "adafruit-feather-nrf52840-express": _NRFUTIL,
+    "seeedstudio-xiao-nrf52840": _NRFUTIL,
+    "seeedstudio-xiao-nrf52840-sense": _NRFUTIL,
+}
+
 
 def port_of(board):
     """Shell variable (set by inet-nm on the Pi) holding the board's serial port."""
@@ -295,9 +308,14 @@ def flash(name, firmware, prefix=""):
         warn(f"copying the firmware to {host} failed")
         return False
     remote = f"{remote_dir}/{files[0]}"
+    extra = FLASH_VARS.get(e["board"], "").format(fw=remote)
+    if extra and "HEXFILE=" in extra and not remote.endswith(".hex"):
+        warn(f"'{name}' needs a .hex firmware, got {os.path.basename(firmware)}")
+        return False
+    extra = f"{extra} " if extra else ""
     adapter = "" if e["board"] in NO_ADAPTER_ID else "DEBUG_ADAPTER_ID=$NM_SERIAL "
     bindir = f"BINDIR={remote_dir} " if esp else ""
-    make = (f"make -C {PI_APP} BOARD=$NM_BOARD {adapter}{bindir}PORT={port_of(e['board'])} "
+    make = (f"make -C {PI_APP} BOARD=$NM_BOARD {adapter}{bindir}{extra}PORT={port_of(e['board'])} "
             f"FLASHFILE={remote} flash-only")
     # remove the copied firmware afterwards, whatever the result
     res = ssh_stream(host, f"inet-nm-exec {shlex.quote(make)} -d {uid}; "
