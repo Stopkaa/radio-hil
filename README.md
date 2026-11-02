@@ -151,6 +151,27 @@ the HIL ping every other one, in both directions:
 python tests/interop/interop_test.py --riotbase ~/RIOT --dut nrf52840dk
 ```
 
+## 802.15.4 sniffer in Wireshark
+
+STM32WB55 USB dongles running ST's sniffer firmware hang on the Pis.
+`dist/radiohil_sniffer.py` is a Wireshark extcap plugin: every dongle on
+every Pi shows up as its own capture interface (e.g. "radio-hil-1 STM
+sniffer 206138793036"), the channel is set via the gear icon next to it.
+It only needs Python 3 on the laptop and the `~/.ssh/config` entries from
+[Setup](#setup).
+
+```sh
+mkdir -p ~/.local/lib/wireshark/extcap
+cp dist/radiohil_sniffer.py ~/.local/lib/wireshark/extcap/
+chmod +x ~/.local/lib/wireshark/extcap/radiohil_sniffer.py
+~/.local/lib/wireshark/extcap/radiohil_sniffer.py --extcap-interfaces   # lists the dongles
+```
+
+Then restart Wireshark (or Capture → Refresh Interfaces). Several dongles
+can be captured at once by selecting several interfaces. Each dongle can
+only be used by one person at a time, agree with the others. Stopping the
+capture in Wireshark also stops it on the Pi.
+
 ## Board names
 
 A board is called `<RIOT board>-<n>`, where `n` is the number of the Pi it is
